@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Video Generator Studio</title>
+  <!-- MP4Muxer kitabxanası - Brauzerdə MP4 faylı kodlaşdırmaq üçün -->
+  <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.0/build/mp4-muxer.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      background: #1e293b;
+      padding: 25px;
+      border-radius: 16px;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      border: 1px solid #334155;
+    }
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: 20px;
+      text-align: center;
+      color: #38bdf8;
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.9rem;
+      color: #94a3b8;
+    }
+    textarea, select, input {
+      width: 100%;
+      padding: 12px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.95rem;
+      outline: none;
+    }
+    textarea { height: 80px; resize: none; }
+    button {
+      width: 100%;
+      padding: 14px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-top: 10px;
+    }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #475569; cursor: not-allowed; }
+    
+    #previewCanvas {
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      margin-top: 15px;
+      background: #000;
+      display: block;
+    }
+    
+    .status {
+      margin-top: 15px;
+      font-size: 0.85rem;
+      text-align: center;
+      color: #38bdf8;
+      min-height: 20px;
+    }
+    video {
+      width: 100%;
+      margin-top: 15px;
+      border-radius: 8px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>AI Video Generator</h1>
+
+  <div class="input-group">
+    <label for="videoText">Video Mətni / Titr:</label>
+    <textarea id="videoText" placeholder="Videoda görünəcək mətni yazın...">Gələcəyin Texnologiyası İndi Başlayır!</textarea>
+  </div>
+
+  <div class="input-group">
+    <label for="bgStyle">Vizual Stili Seçin:</label>
+    <select id="bgStyle">
+      <option value="cyberpunk">Cyberpunk Neon</option>
+      <option value="space">Kainat Dumanlığı</option>
+      <option value="gradient">Dinamik Qradiyent</option>
+    </select>
+  </div>
+
+  <div class="input-group">
+    <label for="duration">Video Müddəti (saniyə):</label>
+    <select id="duration">
+      <option value="3">3 Saniyə</option>
+      <option value="5" selected>5 Saniyə</option>
+      <option value="10">10 Saniyə</option>
+    </select>
+  </div>
+
+  <button id="generateBtn" onclick="generateVideo()">Video Hazırla və Yüklə (MP4)</button>
+
+  <div id="status" class="status"></div>
+
+  <!-- Gizli çəkiliş canvası -->
+  <canvas id="previewCanvas" width="720" height="1280"></canvas>
+  
+  <!-- Nəticə videosu -->
+  <video id="resultVideo" controls></video>
+</div>
+
+<script>
+async function generateVideo() {
+  const text = document.getElementById('videoText').value || "Sınaq Mətni";
+  const style = document.getElementById('bgStyle').value;
+  const durationSec = parseInt(document.getElementById('duration').value);
+  const btn = document.getElementById('generateBtn');
+  const status = document.getElementById('status');
+  const canvas = document.getElementById('previewCanvas');
+  const ctx = canvas.getContext('2d');
+  const resultVideo = document.getElementById('resultVideo');
+
+  if (!window.VideoEncoder) {
+    alert("Brauzeriniz WebCodecs API dəstəkləmir. Zəhmət olmasa Chrome və ya Edge brauzerindən istifadə edin.");
+    return;
+  }
+
+  btn.disabled = true;
+  resultVideo.style.display = 'none';
+  status.textContent = "Video kadroları hazırlanır...";
+
+  const fps = 30;
+  const totalFrames = durationSec * fps;
+  const width = 720;
+  const height = 1280;
+
+  // MP4 Muxer konfiqurasiyası
+  let muxer = new Mp4Muxer.Muxer({
+    target: new Mp4Muxer.ArrayBufferTarget(),
+    video: {
+      codec: 'avc',
+      width: width,
+      height: height
+    },
+    fastStart: 'in-memory'
+  });
+
+  let videoEncoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: (e) => console.error(e)
+  });
+
+  videoEncoder.configure({
+    codec: 'avc1.42001f', // H.264 High Profile
+    width: width,
+    height: height,
+    bitrate: 3_000_000 // 3 Mbps
+  });
+
+  // Kadroların çəkilməsi dövrü
+  for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+    const progress = frameIndex / totalFrames;
+    status.textContent = `Kadrlar yaradılır: ${frameIndex + 1} / ${totalFrames}`;
+
+    // 1. Fonu çək
+    drawBackground(ctx, width, height, progress, style);
+
+    // 2. Mətni çək (böyümə və şəffaflıq animasiyası ilə)
+    drawText(ctx, text, width, height, progress);
+
+    // 3. Cadrdan VideoFrame yarat
+    const frame = new VideoFrame(canvas, {
+      timestamp: (frameIndex / fps) * 1_000_000 // mikrosaniyə
+    });
+
+    // 4. Enkodere göndər (hər 30 kadrdan bir KeyFrame)
+    videoEncoder.encode(frame, { keyFrame: frameIndex % 30 === 0 });
+    frame.close();
+
+    // UI donmasın deyə kiçik fasilə
+    await new Promise(r => setTimeout(r, 5));
+  }
+
+  status.textContent = "MP4 faylı formalaşdırılır...";
+  await videoEncoder.flush();
+  muxer.finalize();
+
+  // Yükləmə linki yarat
+  const { buffer } = muxer.target;
+  const blob = new Blob([buffer], { type: 'video/mp4' });
+  const url = URL.createObjectURL(blob);
+
+  resultVideo.src = url;
+  resultVideo.style.display = 'block';
+  status.textContent = "Video hazır oldu! Aşağıda baxa və ya yükləyə bilərsiniz.";
+
+  // Avtomatik yüklə
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ai-video-${Date.now()}.mp4`;
+  a.click();
+
+  btn.disabled = false;
+}
+
+// Fon animasiya effekti
+function drawBackground(ctx, w, h, t, style) {
+  if (style === 'cyberpunk') {
+    ctx.fillStyle = '#09090e';
+    ctx.fillRect(0, 0, w, h);
+    
+    // Yanan dairələr
+    let gradient = ctx.createRadialGradient(w/2, h/2, 10, w/2, h/2, 400 + Math.sin(t * Math.PI * 2) * 50);
+    gradient.addColorStop(0, 'rgba(255, 0, 128, 0.8)');
+    gradient.addColorStop(0.5, 'rgba(0, 255, 240, 0.4)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
+
+  } else if (style === 'space') {
+    let gradient = ctx.createLinearGradient(0, 0, w, h);
+    gradient.addColorStop(0, '#020617');
+    gradient.addColorStop(0.5, '#1e1b4b');
+    gradient.addColorStop(1, '#0f172a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
+
+    // Ulduzlar
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 50; i++) {
+      let x = (Math.sin(i * 99 + t) * 0.5 + 0.5) * w;
+      let y = (Math.cos(i * 33 + t) * 0.5 + 0.5) * h;
+      let size = (Math.sin(t * 10 + i) + 1.5) * 2;
+      ctx.fillRect(x, y, size, size);
+    }
+
+  } else {
+    // Qradiyent
+    let gradient = ctx.createLinearGradient(0, 0, w * Math.sin(t * Math.PI), h);
+    gradient.addColorStop(0, '#2563eb');
+    gradient.addColorStop(1, '#9333ea');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
+// Mətni kadra çəkmək
+function drawText(ctx, text, w, h, t) {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  
+  // Animasiya: daxil olma və miqyas alma
+  let scale = 0.8 + Math.sin(t * Math.PI) * 0.3;
+  let alpha = Math.sin(t * Math.PI); // evə girib-çıxma şəffaflığı
+
+  ctx.translate(w / 2, h / 2);
+  ctx.scale(scale, scale);
+
+  ctx.font = 'bold 48px sans-serif';
+  ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(alpha * 1.5, 1)})`;
+  ctx.shadowColor = 'rgba(0,0,0,0.8)';
+  ctx.shadowBlur = 20;
+
+  // Çoxsətirli mətni bölmək
+  const words = text.split(' ');
+  let line = '';
+  let lines = [];
+  
+  for(let n = 0; n < words.length; n++) {
+    let testLine = line + words[n] + ' ';
+    let metrics = ctx.measureText(testLine);
+    if (metrics.width > w - 100 && n > 0) {
+      lines.push(line);
+      line = words[n] + ' ';
+    } else {
+      line = testLine;
+    }
+  }
+  lines.push(line);
+
+  let lineHeight = 60;
+  let startY = -((lines.length - 1) * lineHeight) / 2;
+
+  lines.forEach((l, index) => {
+    ctx.fillText(l.trim(), 0, startY + (index * lineHeight));
+  });
+
+  ctx.restore();
+}
+</script>
+
+</body>
+</html>
